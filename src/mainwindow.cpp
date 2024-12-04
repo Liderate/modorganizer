@@ -2558,7 +2558,7 @@ void MainWindow::saveArchiveList()
         }
       }
     }
-    archiveFile.commitIfDifferent(m_ArchiveListHash);
+    archiveFile->commit();
   } else {
     log::debug("archive list not initialised");
   }
@@ -3775,7 +3775,12 @@ QString MainWindow::queryRestore(const QString& filePath)
       QDateTime time = QDateTime::fromString(match.captured(1), PATTERN_BACKUP_DATE);
       dialog.addChoice(time.toString(), "", match.captured(1));
     } else if (match2.hasMatch()) {
-      dialog.addChoice(match2.captured(1), "", match2.captured(1));
+      QString description =
+          match2.captured(1).size() == 6
+              ? "This file may have been left behind after an incomplete save. Please "
+                "verify its contents or delete it from your profile folder"
+              : "";
+      dialog.addChoice(match2.captured(1), description, match2.captured(1));
     }
   }
 
@@ -3799,16 +3804,38 @@ void MainWindow::on_restoreButton_clicked()
   if (!choice.isEmpty()) {
     QString loadOrderName = m_OrganizerCore.currentProfile()->getLoadOrderFileName();
     QString lockedName    = m_OrganizerCore.currentProfile()->getLockedOrderFileName();
-    if (!shellCopy(pluginName + "." + choice, pluginName, true, this) ||
-        !shellCopy(loadOrderName + "." + choice, loadOrderName, true, this) ||
-        !shellCopy(lockedName + "." + choice, lockedName, true, this)) {
 
-      const auto e = GetLastError();
+    QString pluginBackup    = pluginName + "." + choice;
+    QString loadOrderBackup = loadOrderName + "." + choice;
+    QString lockedBackup    = lockedName + "." + choice;
 
-      QMessageBox::critical(this, tr("Restore failed"),
-                            tr("Failed to restore the backup. Errorcode: %1")
-                                .arg(QString::fromStdWString(formatSystemMessage(e))));
+    QStringList missingFiles;
+    if (!QFile::exists(pluginBackup))
+      missingFiles << pluginBackup;
+    if (!QFile::exists(loadOrderBackup))
+      missingFiles << loadOrderBackup;
+    if (!QFile::exists(lockedBackup))
+      missingFiles << lockedBackup;
+
+    if (missingFiles.isEmpty()) {
+      if (!shellCopy(pluginBackup, pluginName, true, this) ||
+          !shellCopy(loadOrderBackup, loadOrderName, true, this) ||
+          !shellCopy(lockedBackup, lockedName, true, this)) {
+
+        const auto e = GetLastError();
+
+        QMessageBox::critical(
+            this, tr("Restore failed"),
+            tr("Failed to restore the backup. Errorcode: %1")
+                .arg(QString::fromStdWString(formatSystemMessage(e))));
+      }
+    } else {
+      QMessageBox::critical(
+          this, tr("Missing backup files"),
+          tr("Restore cannot proceed because the following files are missing:\n%1")
+              .arg(missingFiles.join('\n')));
     }
+
     m_OrganizerCore.refreshESPList(true);
   }
 }
